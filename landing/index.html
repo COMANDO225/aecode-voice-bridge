@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AECODE Voz — Puente de audio</title>
+<style>
+  :root{--bg:#0F1F3D;--card:#0b1730;--gold:#FFD700;--text:#eaf0ff;--muted:#9ab;}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.55}
+  .wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+  header{text-align:center;padding:40px 0 12px}
+  .logo{font-size:40px}
+  h1{font-size:30px;margin:12px 0 6px;color:#c9b3ff}
+  .tag{color:var(--muted);font-size:17px;margin:0 auto;max-width:520px}
+  .cta{display:inline-flex;align-items:center;gap:10px;margin:28px 0 8px;background:var(--gold);color:var(--bg);
+       font-size:20px;font-weight:800;padding:16px 30px;border-radius:14px;text-decoration:none;box-shadow:0 8px 24px rgba(255,215,0,.18)}
+  .cta:hover{transform:translateY(-1px)}
+  .os{color:var(--muted);font-size:13px;margin-top:6px}
+  .card{background:var(--card);border:1px solid #26365c;border-radius:16px;padding:22px 24px;margin:22px 0}
+  h2{font-size:19px;color:var(--gold);margin:0 0 12px}
+  ol,ul{margin:0;padding-left:22px}
+  li{margin:8px 0}
+  .muted{color:var(--muted)}
+  code{background:#142a4d;padding:2px 7px;border-radius:6px;font-size:14px}
+  .center{text-align:center}
+  footer{text-align:center;color:var(--muted);font-size:13px;margin-top:34px}
+  a{color:#8fbcff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">🎙️</div>
+    <h1>AECODE Voz — Puente de audio</h1>
+    <p class="tag">Envía el audio del ponente a la traducción en vivo. Corre en la bandeja del sistema,
+    no lo afecta minimizar, y reconecta solo.</p>
+    <div class="center">
+      <a class="cta" href="https://github.com/COMANDO225/aecode-voice-bridge/releases/latest/download/aecode-voice-bridge.exe">
+        ⬇ Descargar para Windows
+      </a>
+      <div class="os">Windows 10/11 · 64-bit · sin instalación (portable)</div>
+    </div>
+  </header>
+
+  <div class="card">
+    <h2>Cómo usar</h2>
+    <ol>
+      <li>Doble-clic al <code>.exe</code> → aparece el ícono 🎙️ en la bandeja (abajo a la derecha).</li>
+      <li>Clic derecho → <b>Micrófono</b> → elegí tu <b>tarjeta de sonido USB</b>.</li>
+      <li>Confirmá que <b>Nivel</b> se mueva cuando alguien habla por el micrófono.</li>
+      <li><b>Estado: Conectado ✓</b> = está enviando a la nube. Listo.</li>
+    </ol>
+    <p class="muted">Opcional: activá <b>“Iniciar con el sistema”</b> para que arranque solo al prender la laptop.</p>
+  </div>
+
+  <div class="card">
+    <h2>Hardware necesario</h2>
+    <p class="muted">El audio del ponente entra por el receptor UHF a una <b>tarjeta de sonido USB con entrada</b>
+    (de micrófono o línea), y esa tarjeta va al USB de la laptop.</p>
+    <ul>
+      <li>Tarjeta USB de <b>2 jacks</b> (verde=salida, 🎤 rosa=<b>entrada</b>) → el UHF va al de micrófono.</li>
+      <li>O <b>Behringer UCA202</b> (entrada de línea, mejor calidad, sin saturación).</li>
+      <li>⚠️ Los adaptadores de <b>un solo jack</b> suelen ser solo salida → <b>no sirven</b>.</li>
+      <li>Si satura, <b>bajá el volumen de salida del receptor UHF</b>.</li>
+    </ul>
+  </div>
+
+  <footer>
+    AECODE · CONEIC — traducción en vivo &middot;
+    <a href="https://github.com/COMANDO225/aecode-voice-bridge">código en GitHub</a>
+  </footer>
+</div>
+</body>
+</html>
