@@ -1,0 +1,32 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # crear el Release
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build Windows .exe (bandeja, sin consola)
+        env:
+          CGO_ENABLED: '1'
+        run: go build -ldflags "-H windowsgui -s -w" -o aecode-voice-bridge.exe .
+      - name: Subir artefacto (siempre)
+        uses: actions/upload-artifact@v4
+        with:
+          name: aecode-voice-bridge-exe
+          path: aecode-voice-bridge.exe
+      - name: Publicar Release (en tags)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: aecode-voice-bridge.exe
+          generate_release_notes: true
