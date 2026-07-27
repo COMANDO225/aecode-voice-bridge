@@ -12,55 +12,81 @@ import (
 type status int32
 
 const (
-	statusReconnecting status = iota
-	statusConnected
+	statusOff          status = iota // switch apagado: no se envía
+	statusReconnecting               // switch prendido pero sin conexión
+	statusConnected                  // enviando al backend
 )
 
-// uplink streams captured frames to the /ingest WebSocket, reconnecting forever.
-// The capture keeps running independently; only the network link retries.
+// uplink streams captured frames to the /ingest WebSocket — but ONLY while the
+// switch is enabled. It always drains the frames channel (so it never blocks the
+// capture) and connects/sends only when enabled, reconnecting on failure.
 type uplink struct {
-	frames <-chan []byte
-	st     atomic.Int32
+	frames  <-chan []byte
+	st      atomic.Int32
+	enabled atomic.Bool
 }
 
 func newUplink(frames <-chan []byte) *uplink { return &uplink{frames: frames} }
 
-func (u *uplink) status() status { return status(u.st.Load()) }
+func (u *uplink) status() status  { return status(u.st.Load()) }
+func (u *uplink) sending() bool   { return u.enabled.Load() }
+func (u *uplink) setEnabled(b bool) { u.enabled.Store(b) }
 
-func (u *uplink) run(ctx context.Context, base, event, room string) {
-	full := buildURL(base, event, room)
-	for ctx.Err() == nil {
-		u.st.Store(int32(statusReconnecting))
-		u.session(ctx, full)
-		if ctx.Err() != nil {
-			return
-		}
-		select { // brief backoff before redial
-		case <-ctx.Done():
-		case <-time.After(2 * time.Second):
-		}
+func (u *uplink) statusStr() string {
+	switch u.status() {
+	case statusConnected:
+		return "connected"
+	case statusReconnecting:
+		return "connecting"
+	default:
+		return "off"
 	}
 }
 
-func (u *uplink) session(ctx context.Context, full string) {
-	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	c, _, err := websocket.Dial(dctx, full, nil)
-	cancel()
-	if err != nil {
-		return
+func (u *uplink) run(ctx context.Context, base, event, room string) {
+	full := buildURL(base, event, room)
+	var conn *websocket.Conn
+	var lastDial time.Time
+	closeConn := func() {
+		if conn != nil {
+			conn.CloseNow()
+			conn = nil
+		}
 	}
-	defer c.CloseNow()
-	u.st.Store(int32(statusConnected))
+	defer closeConn()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case f := <-u.frames:
+		case f := <-u.frames: // always drain, even when off
+			if !u.enabled.Load() {
+				closeConn()
+				u.st.Store(int32(statusOff))
+				continue
+			}
+			if conn == nil {
+				if time.Since(lastDial) < 2*time.Second { // throttle redials
+					u.st.Store(int32(statusReconnecting))
+					continue
+				}
+				lastDial = time.Now()
+				dctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+				nc, _, err := websocket.Dial(dctx, full, nil)
+				cancel()
+				if err != nil {
+					u.st.Store(int32(statusReconnecting))
+					continue
+				}
+				conn = nc
+				u.st.Store(int32(statusConnected))
+			}
 			wctx, wcancel := context.WithTimeout(ctx, 5*time.Second)
-			err := c.Write(wctx, websocket.MessageBinary, f)
+			err := conn.Write(wctx, websocket.MessageBinary, f)
 			wcancel()
 			if err != nil {
-				return
+				closeConn()
+				u.st.Store(int32(statusReconnecting))
 			}
 		}
 	}

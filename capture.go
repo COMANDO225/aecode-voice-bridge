@@ -3,10 +3,14 @@ package main
 import (
 	"math"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/gen2brain/malgo"
 )
+
+// wfLen is how many peak points the live waveform ring holds (~2s of history).
+const wfLen = 256
 
 // capture reads audio from an input device at 16 kHz mono s16le (miniaudio
 // resamples from the hardware format internally) and pushes frames to a channel.
@@ -19,6 +23,10 @@ type capture struct {
 	sent    atomic.Uint64
 	dropped atomic.Uint64
 	lvlBits atomic.Uint64 // last frame RMS as float64 bits
+
+	wfMu sync.Mutex
+	wf   [wfLen]float32 // ring of recent peak amplitudes (for the live waveform)
+	wfN  int            // next write index
 }
 
 func newCapture() (*capture, error) {
@@ -57,6 +65,7 @@ func (c *capture) start(match string) error {
 	}
 	onFrames := func(_, in []byte, _ uint32) {
 		c.lvlBits.Store(math.Float64bits(rms(in)))
+		c.pushWaveform(in)
 		buf := make([]byte, len(in))
 		copy(buf, in)
 		select {
@@ -86,6 +95,40 @@ func (c *capture) stop() {
 }
 
 func (c *capture) level() float64 { return math.Float64frombits(c.lvlBits.Load()) }
+
+// pushWaveform appends peak amplitudes (one per ~128 samples ≈ 8 ms) to the ring,
+// giving the panel a scrolling oscilloscope of the live input.
+func (c *capture) pushWaveform(b []byte) {
+	const step = 128 // samples per peak
+	c.wfMu.Lock()
+	for i := 0; i+1 < len(b); {
+		var peak float32
+		end := i + step*2
+		for ; i+1 < len(b) && i < end; i += 2 {
+			s := float32(int16(uint16(b[i])|uint16(b[i+1])<<8)) / 32768
+			if s < 0 {
+				s = -s
+			}
+			if s > peak {
+				peak = s
+			}
+		}
+		c.wf[c.wfN%wfLen] = peak
+		c.wfN++
+	}
+	c.wfMu.Unlock()
+}
+
+// waveform returns the ring in chronological order (oldest → newest).
+func (c *capture) waveform() []float32 {
+	out := make([]float32, wfLen)
+	c.wfMu.Lock()
+	for i := 0; i < wfLen; i++ {
+		out[i] = c.wf[(c.wfN+i)%wfLen]
+	}
+	c.wfMu.Unlock()
+	return out
+}
 
 func (c *capture) findID(match string) (malgo.DeviceID, bool) {
 	infos, err := c.ctx.Devices(malgo.Capture)

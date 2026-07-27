@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AECODE Voz — Panel</title>
+<style>
+  :root{--bg:#0F1F3D;--card:#0b1730;--edge:#26365c;--gold:#FFD700;--text:#eaf0ff;--muted:#9ab;
+        --green:#7fffbf;--yellow:#ffd35e;--gray:#5b6b8a;--red:#ff5e8a}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;
+       display:flex;flex-direction:column;min-height:100vh}
+  .wrap{max-width:640px;width:100%;margin:0 auto;padding:20px 20px 28px;flex:1;display:flex;flex-direction:column;gap:16px}
+  header{display:flex;align-items:center;gap:10px}
+  header .logo{font-size:26px}
+  header h1{font-size:18px;margin:0;color:#c9b3ff}
+  .pill{display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:15px;padding:8px 14px;
+        border-radius:999px;background:var(--card);border:1px solid var(--edge)}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--gray)}
+  .pill.on   .dot{background:var(--green);box-shadow:0 0 10px var(--green)}
+  .pill.wait .dot{background:var(--yellow);box-shadow:0 0 10px var(--yellow)}
+  .card{background:var(--card);border:1px solid var(--edge);border-radius:16px;padding:16px}
+  .lbl{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px}
+  canvas{width:100%;height:150px;display:block;background:#08122a;border-radius:12px}
+  .meter{height:8px;background:#08122a;border-radius:4px;overflow:hidden;margin-top:10px}
+  .meter > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--green),var(--gold));transition:width .05s}
+  select{width:100%;font-size:15px;padding:10px 12px;border-radius:10px;border:1px solid var(--edge);background:#08122a;color:var(--text)}
+  .switchrow{display:flex;align-items:center;justify-content:space-between;gap:14px}
+  .switchrow .t{font-size:16px;font-weight:700}
+  .switchrow .s{font-size:13px;color:var(--muted)}
+  .toggle{position:relative;width:64px;height:34px;border-radius:999px;background:#33436b;border:none;cursor:pointer;flex:none;transition:background .2s}
+  .toggle::after{content:"";position:absolute;top:3px;left:3px;width:28px;height:28px;border-radius:50%;background:#fff;transition:left .2s}
+  .toggle.on{background:var(--green)}
+  .toggle.on::after{left:33px}
+  footer{color:var(--muted);font-size:12px;text-align:center}
+  code{background:#08122a;padding:2px 7px;border-radius:6px}
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(4,10,25,.72);display:none;align-items:center;justify-content:center;padding:20px;z-index:10}
+  .overlay.show{display:flex}
+  .modal{background:#0e1c3a;border:1px solid var(--edge);border-radius:16px;max-width:420px;width:100%;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .modal h3{margin:0 0 8px;font-size:19px;color:var(--gold)}
+  .modal p{margin:0 0 18px;color:#cdd8f5;line-height:1.5}
+  .modal .row{display:flex;gap:10px;justify-content:flex-end}
+  .btn{font-size:15px;font-weight:700;padding:11px 18px;border-radius:10px;border:0;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--edge)}
+  .btn.ok{background:var(--gold);color:var(--bg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><span class="logo">🎙️</span><h1>AECODE Voz — Puente de audio</h1></header>
+
+  <div id="pill" class="pill"><span class="dot"></span><span id="pillText">Conectando panel…</span></div>
+
+  <div class="card">
+    <p class="lbl">Sonido que se está detectando (entrada)</p>
+    <canvas id="wave"></canvas>
+    <div class="meter"><i id="meter"></i></div>
+  </div>
+
+  <div class="card">
+    <p class="lbl">Micrófono / tarjeta de sonido</p>
+    <select id="device"></select>
+  </div>
+
+  <div class="card switchrow">
+    <div>
+      <div class="t">Enviar al servidor</div>
+      <div class="s" id="switchSub">Apagado — el audio no sale de esta PC</div>
+    </div>
+    <button id="toggle" class="toggle" aria-label="Enviar al servidor"></button>
+  </div>
+
+  <footer>Servidor: <code id="url">—</code><br>Cerrá esta ventana cuando quieras; la app sigue activa en la bandeja.</footer>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3 id="mTitle"></h3>
+    <p id="mBody"></p>
+    <div class="row">
+      <button class="btn ghost" id="mCancel">Cancelar</button>
+      <button class="btn ok" id="mOk">Aceptar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const cv = $('wave'), ctx = cv.getContext('2d');
+let sending = false, pendingOn = null;
+
+function fit(){ const r=cv.getBoundingClientRect(), d=devicePixelRatio||1;
+  cv.width=r.width*d; cv.height=r.height*d; ctx.setTransform(d,0,0,d,0,0); }
+addEventListener('resize', fit); fit();
+
+function drawWave(wave){
+  const w=cv.width/(devicePixelRatio||1), h=cv.height/(devicePixelRatio||1), mid=h/2;
+  ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle='#1b2b4d'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,mid); ctx.lineTo(w,mid); ctx.stroke();
+  const n=wave.length, bw=w/n; ctx.fillStyle='#FFD700';
+  for(let i=0;i<n;i++){ const a=Math.min(1,wave[i])*mid*0.92; ctx.fillRect(i*bw, mid-a, Math.max(1,bw-0.5), a*2||1); }
+}
+
+function setPill(status, snd){
+  const p=$('pill'); p.className='pill';
+  if(snd && status==='connected'){ p.classList.add('on'); $('pillText').textContent='Enviando en vivo ✓'; }
+  else if(snd){ p.classList.add('wait'); $('pillText').textContent='Conectando al servidor…'; }
+  else { $('pillText').textContent='Detenido — no se envía'; }
+}
+function setSwitch(snd){
+  sending=snd; $('toggle').classList.toggle('on', snd);
+  $('switchSub').textContent = snd ? 'Encendido — enviando a la traducción en vivo' : 'Apagado — el audio no sale de esta PC';
+}
+
+// ── modal ──
+function ask(on){
+  pendingOn=on;
+  $('mTitle').textContent = on ? 'Empezar a enviar' : 'Detener el envío';
+  $('mBody').textContent = on
+    ? 'Vas a EMPEZAR a enviar el audio a la traducción en vivo. Los oyentes comenzarán a recibir la traducción. ¿Continuar?'
+    : 'Vas a DETENER el envío. Los oyentes dejarán de recibir la traducción. ¿Continuar?';
+  $('overlay').classList.add('show');
+}
+$('mCancel').onclick = ()=> $('overlay').classList.remove('show');
+$('mOk').onclick = ()=>{ $('overlay').classList.remove('show'); if(pendingOn!==null) ws.send(JSON.stringify({cmd:'setSending', on:pendingOn})); };
+$('toggle').onclick = ()=> ask(!sending);
+$('device').onchange = e => ws.send(JSON.stringify({cmd:'setDevice', name:e.target.value}));
+
+// ── websocket ──
+let ws;
+function connect(){
+  ws = new WebSocket('ws://'+location.host+'/ws');
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if(m.type==='init'){
+      const sel=$('device'); sel.innerHTML='';
+      (m.devices||[]).forEach(d=>{ const o=document.createElement('option'); o.value=d; o.textContent=d; if(d===m.device)o.selected=true; sel.appendChild(o); });
+      $('url').textContent = m.url || '—';
+      setSwitch(!!m.sending); setPill(m.status, !!m.sending);
+    } else if(m.type==='tick'){
+      drawWave(m.wave||[]); $('meter').style.width = Math.min(100,(m.level||0)*400)+'%';
+      setSwitch(!!m.sending); setPill(m.status, !!m.sending);
+    }
+  };
+  ws.onclose = ()=>{ $('pillText').textContent='Panel desconectado — reabrí desde la bandeja'; setTimeout(connect,1500); };
+}
+connect();
+</script>
+</body>
+</html>
