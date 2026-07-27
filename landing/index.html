@@ -4,14 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AECODE Voz — Puente de audio</title>
+<link rel="icon" href="https://raw.githubusercontent.com/COMANDO225/aecode-voice-bridge/main/icon.png">
 <style>
   :root{--bg:#0F1F3D;--card:#0b1730;--gold:#FFD700;--text:#eaf0ff;--muted:#9ab;}
   *{box-sizing:border-box}
   body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.55}
   .wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
-  header{text-align:center;padding:40px 0 12px}
-  .logo{font-size:40px}
-  h1{font-size:30px;margin:12px 0 6px;color:#c9b3ff}
+  header{text-align:center;padding:36px 0 12px}
+  .logo{width:96px;height:96px;border-radius:22px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  h1{font-size:30px;margin:16px 0 6px;color:#c9b3ff}
   .tag{color:var(--muted);font-size:17px;margin:0 auto;max-width:520px}
   .cta{display:inline-flex;align-items:center;gap:10px;margin:28px 0 8px;background:var(--gold);color:var(--bg);
        font-size:20px;font-weight:800;padding:16px 30px;border-radius:14px;text-decoration:none;box-shadow:0 8px 24px rgba(255,215,0,.18)}
@@ -31,7 +32,7 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="logo">🎙️</div>
+    <img class="logo" src="https://raw.githubusercontent.com/COMANDO225/aecode-voice-bridge/main/icon.png" alt="AECODE Voz">
     <h1>AECODE Voz — Puente de audio</h1>
     <p class="tag">Envía el audio del ponente a la traducción en vivo. Corre en la bandeja del sistema,
     no lo afecta minimizar, y reconecta solo.</p>
@@ -46,12 +47,13 @@
   <div class="card">
     <h2>Cómo usar</h2>
     <ol>
-      <li>Doble-clic al <code>.exe</code> → aparece el ícono 🎙️ en la bandeja (abajo a la derecha).</li>
-      <li>Clic derecho → <b>Micrófono</b> → elegí tu <b>tarjeta de sonido USB</b>.</li>
-      <li>Confirmá que <b>Nivel</b> se mueva cuando alguien habla por el micrófono.</li>
-      <li><b>Estado: Conectado ✓</b> = está enviando a la nube. Listo.</li>
+      <li>Doble-clic al <code>.exe</code> → aparece el ícono 🎙️ en la bandeja (abajo a la derecha) y se abre el panel.</li>
+      <li>En el panel, elegí tu <b>tarjeta de sonido USB</b> y mirá que la <b>onda se mueva</b> cuando hay sonido.</li>
+      <li>Prendé el <b>switch “Enviar al servidor”</b> y confirmá en el modal.</li>
+      <li>Estado <b>Enviando ✓</b> = está mandando a la nube. Listo.</li>
     </ol>
-    <p class="muted">Opcional: activá <b>“Iniciar con el sistema”</b> para que arranque solo al prender la laptop.</p>
+    <p class="muted">Cerrar el panel no cierra la app (sigue en la bandeja). Para salir del todo: bandeja → <b>Salir</b>.
+    Opcional: <b>“Iniciar con el sistema”</b> para que arranque solo.</p>
   </div>
 
   <div class="card">
