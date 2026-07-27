@@ -15,10 +15,24 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # Las coordenadas del servidor se graban al compilar. Sin esto el .exe descargado
+      # cae a localhost, sin clave y sin lista de salas: se abre con el desplegable
+      # vacío y nada explica por qué. Se leen de variables/secretos del repo para no
+      # tenerlas en el código.
       - name: Build Windows .exe (bandeja, sin consola)
         env:
           CGO_ENABLED: '1'
-        run: go build -ldflags "-H windowsgui -s -w" -o aecode-voice-bridge.exe .
+          URL: ${{ vars.BRIDGE_URL }}
+          EVENT: ${{ vars.BRIDGE_EVENT }}
+          ROOMS: ${{ vars.BRIDGE_ROOMS_URL }}
+          KEY: ${{ secrets.BRIDGE_INGEST_KEY }}
+        run: >
+          go build -ldflags "-H windowsgui -s -w
+          -X main.bakedURL=$env:URL
+          -X main.bakedEvent=$env:EVENT
+          -X main.bakedRoomsURL=$env:ROOMS
+          -X main.bakedKey=$env:KEY"
+          -o aecode-voice-bridge.exe .
       - name: Subir artefacto (siempre)
         uses: actions/upload-artifact@v4
         with:

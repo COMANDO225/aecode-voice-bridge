@@ -29,13 +29,35 @@ type RoomChoice struct {
 	Label string `json:"label"`
 }
 
-// defaultConfig deja Event y Room VACÍOS a propósito.
+// Valores grabados al compilar con -ldflags "-X main.bakedURL=... -X main.bakedEvent=...".
+// Sin ellos el ejecutable descargado apuntaría a localhost, sin clave y sin lista de
+// salas: se abriría con el desplegable vacío y nada explicaría por qué. Quien prepara
+// la laptop no debería tener que escribir un JSON a mano para que funcione.
+//
+// bakedKey viaja DENTRO del ejecutable, así que solo frena la emisión accidental —un
+// puente olvidado con autostart— no a quien de verdad quiera inyectar audio. Si el
+// enlace de descarga es público, la clave es pública: el control real es quién puede
+// bajarlo.
+var (
+	bakedURL      string
+	bakedEvent    string
+	bakedKey      string
+	bakedRoomsURL string
+)
+
+// defaultConfig deja Room VACÍA a propósito.
 //
 // Antes traía "summit-2026"/"main" de fábrica, y esa era la línea más peligrosa del
 // sistema: una laptop sin configurar entraba a una sala real y se mezclaba con quien
 // estuviera transmitiendo. Sin sala elegida el puente no deja ni encender el envío.
+// El evento sí viene puesto: es el mismo para todas las laptops del congreso, y
+// equivocarlo no mezcla a nadie — simplemente no llega el audio a ninguna parte.
 func defaultConfig() Config {
-	return Config{URL: "ws://localhost:8787/ingest"}
+	c := Config{URL: bakedURL, Event: bakedEvent, Key: bakedKey, RoomsURL: bakedRoomsURL}
+	if c.URL == "" {
+		c.URL = "ws://localhost:8787/ingest"
+	}
+	return c
 }
 
 func configPath() (string, error) {
@@ -59,6 +81,15 @@ func loadConfig() Config {
 		return c
 	}
 	_ = json.Unmarshal(b, &c)
+	// Las coordenadas del servidor son identidad del despliegue, no preferencia del
+	// operador: quien actualiza el ejecutable espera que apunte a donde apunta esa
+	// versión. Sin esto, un config.json de una versión anterior —escrito cuando el
+	// valor de fábrica era localhost y la clave estaba vacía— seguiría mandando tras
+	// actualizar, y el puente se quedaría emitiendo al vacío sin decir nada.
+	// La sala, el micrófono y el autostart SÍ son del operador y no se tocan.
+	if bakedURL != "" {
+		c.URL, c.Event, c.Key, c.RoomsURL = bakedURL, bakedEvent, bakedKey, bakedRoomsURL
+	}
 	return c
 }
 
