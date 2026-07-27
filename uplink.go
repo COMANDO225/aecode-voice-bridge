@@ -24,12 +24,40 @@ type uplink struct {
 	frames  <-chan []byte
 	st      atomic.Int32
 	enabled atomic.Bool
+	// target: la URL completa de ingest. Atómica y NO capturada al arrancar, que era el
+	// motivo de que la sala solo se pudiera cambiar editando un archivo y reiniciando.
+	// Vacía = sin sala elegida: no se disca nada.
+	target atomic.Pointer[string]
+	// rec: copia local a disco de lo que se envía. El seguro contra cortes de red,
+	// reinicios del servidor y caídas del proveedor.
+	rec  *recorder
+	room atomic.Pointer[string]
 }
 
-func newUplink(frames <-chan []byte) *uplink { return &uplink{frames: frames} }
+func newUplink(frames <-chan []byte, rec *recorder) *uplink {
+	return &uplink{frames: frames, rec: rec}
+}
 
-func (u *uplink) status() status  { return status(u.st.Load()) }
-func (u *uplink) sending() bool   { return u.enabled.Load() }
+// setTarget apunta el puente a otra sala. Cierra la conexión en curso para que el
+// siguiente frame reconecte al destino nuevo.
+func (u *uplink) setTarget(base, event, room, key string) {
+	full := ""
+	if room != "" && event != "" {
+		full = buildURL(base, event, room, key)
+	}
+	u.target.Store(&full)
+	u.room.Store(&room)
+}
+
+func (u *uplink) targetURL() string {
+	if p := u.target.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+func (u *uplink) status() status    { return status(u.st.Load()) }
+func (u *uplink) sending() bool     { return u.enabled.Load() }
 func (u *uplink) setEnabled(b bool) { u.enabled.Store(b) }
 
 func (u *uplink) statusStr() string {
@@ -43,9 +71,9 @@ func (u *uplink) statusStr() string {
 	}
 }
 
-func (u *uplink) run(ctx context.Context, base, event, room string) {
-	full := buildURL(base, event, room)
+func (u *uplink) run(ctx context.Context) {
 	var conn *websocket.Conn
+	var connTarget string // a qué URL está conectada `conn`
 	var lastDial time.Time
 	closeConn := func() {
 		if conn != nil {
@@ -60,10 +88,22 @@ func (u *uplink) run(ctx context.Context, base, event, room string) {
 		case <-ctx.Done():
 			return
 		case f := <-u.frames: // always drain, even when off
-			if !u.enabled.Load() {
+			full := u.targetURL()
+			// Se graba lo que se ENVÍA (switch prendido), no lo que se capta: el
+			// archivo debe corresponder con lo que el servidor debería haber recibido.
+			if u.enabled.Load() && u.rec != nil {
+				if p := u.room.Load(); p != nil {
+					u.rec.write(*p, f, time.Now())
+				}
+			}
+			if !u.enabled.Load() || full == "" {
 				closeConn()
 				u.st.Store(int32(statusOff))
 				continue
+			}
+			// Cambió la sala mientras estaba conectado: se corta y se redisca al nuevo.
+			if conn != nil && connTarget != full {
+				closeConn()
 			}
 			if conn == nil {
 				if time.Since(lastDial) < 2*time.Second { // throttle redials
@@ -79,6 +119,7 @@ func (u *uplink) run(ctx context.Context, base, event, room string) {
 					continue
 				}
 				conn = nc
+				connTarget = full
 				u.st.Store(int32(statusConnected))
 			}
 			wctx, wcancel := context.WithTimeout(ctx, 5*time.Second)
@@ -92,8 +133,8 @@ func (u *uplink) run(ctx context.Context, base, event, room string) {
 	}
 }
 
-// buildURL appends ?event=&room= to the ingest base, preserving any existing query.
-func buildURL(base, event, room string) string {
+// buildURL appends ?event=&room=&key= to the ingest base, preserving any existing query.
+func buildURL(base, event, room, key string) string {
 	u, err := url.Parse(base)
 	if err != nil {
 		return base
@@ -104,6 +145,9 @@ func buildURL(base, event, room string) string {
 	}
 	if room != "" {
 		q.Set("room", room)
+	}
+	if key != "" {
+		q.Set("key", key)
 	}
 	u.RawQuery = q.Encode()
 	return u.String()

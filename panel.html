@@ -25,6 +25,11 @@
   canvas{width:100%;height:150px;display:block;background:#08122a;border-radius:12px}
   .meter{height:8px;background:#08122a;border-radius:4px;overflow:hidden;margin-top:10px}
   .meter > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--green),var(--gold));transition:width .05s}
+  .nowbox{margin-top:12px;padding:10px 12px;border-radius:10px;background:#08122a;border:1px solid var(--edge)}
+  .nowlbl{font-size:10px;letter-spacing:.08em;color:#7f8db3;font-weight:700}
+  .nowtitle{font-size:15px;margin-top:3px;font-weight:600}
+  .nowbox.warn{border-color:#b4791f;background:#241a08}
+  .nowbox.warn .nowlbl{color:#e0a53a}
   select{width:100%;font-size:15px;padding:10px 12px;border-radius:10px;border:1px solid var(--edge);background:#08122a;color:var(--text)}
   .switchrow{display:flex;align-items:center;justify-content:space-between;gap:14px}
   .switchrow .t{font-size:16px;font-weight:700}
@@ -57,6 +62,17 @@
     <p class="lbl">Sonido que se está detectando (entrada)</p>
     <canvas id="wave"></canvas>
     <div class="meter"><i id="meter"></i></div>
+  </div>
+
+  <div class="card">
+    <p class="lbl">Sala / auditorio</p>
+    <select id="room"></select>
+    <!-- El rótulo de lo que se está transmitiendo. Es lo que delata en dos segundos
+         que la laptop está apuntando a la sala equivocada. -->
+    <div class="nowbox" id="nowbox">
+      <div class="nowlbl">AHORA EN ESTA SALA</div>
+      <div class="nowtitle" id="nowtitle">—</div>
+    </div>
   </div>
 
   <div class="card">
@@ -127,6 +143,32 @@ $('mCancel').onclick = ()=> $('overlay').classList.remove('show');
 $('mOk').onclick = ()=>{ $('overlay').classList.remove('show'); if(pendingOn!==null) ws.send(JSON.stringify({cmd:'setSending', on:pendingOn})); };
 $('toggle').onclick = ()=> ask(!sending);
 $('device').onchange = e => ws.send(JSON.stringify({cmd:'setDevice', name:e.target.value}));
+$('room').onchange   = e => ws.send(JSON.stringify({cmd:'setRoom',   name:e.target.value}));
+
+let lastRooms = '';
+function renderRooms(rooms, room, now){
+  const sel = $('room');
+  // Solo se repinta si la lista cambió: hacerlo 30 veces por segundo cerraría el
+  // desplegable en la cara del operador justo mientras elige.
+  const sig = JSON.stringify(rooms||[]) + '|' + (room||'');
+  if (sig !== lastRooms) {
+    lastRooms = sig;
+    sel.innerHTML = '';
+    const none = document.createElement('option');
+    none.value=''; none.textContent='— elegí la sala —'; if(!room) none.selected=true;
+    sel.appendChild(none);
+    (rooms||[]).forEach(r=>{
+      const o=document.createElement('option'); o.value=r.slug; o.textContent=r.label;
+      if(r.slug===room)o.selected=true; sel.appendChild(o);
+    });
+  }
+  // Cambiar de sala a mitad de una ponencia siempre es un error.
+  sel.disabled = sending;
+  const box=$('nowbox'), t=$('nowtitle');
+  if(!room){ t.textContent='Elegí la sala para empezar'; box.classList.add('warn'); }
+  else if(now){ t.textContent=now; box.classList.remove('warn'); }
+  else { t.textContent='Sin ponencia programada ahora'; box.classList.remove('warn'); }
+}
 
 // ── websocket ──
 let ws;
@@ -139,9 +181,12 @@ function connect(){
       (m.devices||[]).forEach(d=>{ const o=document.createElement('option'); o.value=d; o.textContent=d; if(d===m.device)o.selected=true; sel.appendChild(o); });
       $('url').textContent = m.url || '—';
       setSwitch(!!m.sending); setPill(m.status, !!m.sending);
+      renderRooms(m.rooms, m.room, m.now);
     } else if(m.type==='tick'){
       drawWave(m.wave||[]); $('meter').style.width = Math.min(100,(m.level||0)*400)+'%';
       setSwitch(!!m.sending); setPill(m.status, !!m.sending);
+      renderRooms(m.rooms, m.room, m.now);
+      if (m.url) $('url').textContent = m.url;
     }
   };
   ws.onclose = ()=>{ $('pillText').textContent='Panel desconectado — reabrí desde la bandeja'; setTimeout(connect,1500); };

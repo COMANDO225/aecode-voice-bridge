@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/coder/websocket"
 	json "encoding/json"
+	"github.com/coder/websocket"
 )
 
 //go:embed panel.html
@@ -17,7 +17,11 @@ var panelHTML []byte
 // startPanel serves the local control panel (HTML + WebSocket) on 127.0.0.1 and
 // returns its URL. The WS streams the live waveform + status ~30 fps and receives
 // the switch (setSending) and microphone (setDevice) commands.
-func startPanel(cap *capture, up *uplink, serverURL string, getDevice func() string, setDevice func(string)) (string, error) {
+func startPanel(
+	cap *capture, up *uplink, feed *roomsFeed,
+	getDevice func() string, setDevice func(string),
+	getRoom func() string, getRooms func() []RoomChoice, setRoom func(string),
+) (string, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", err
@@ -48,7 +52,8 @@ func startPanel(cap *capture, up *uplink, serverURL string, getDevice func() str
 
 		send(map[string]any{
 			"type": "init", "devices": cap.inputDevices(), "device": getDevice(),
-			"url": serverURL, "sending": up.sending(), "status": up.statusStr(),
+			"url": up.targetURL(), "sending": up.sending(), "status": up.statusStr(),
+			"rooms": getRooms(), "room": getRoom(), "now": feed.nowIn(getRoom()),
 		})
 
 		go func() { // commands from the panel
@@ -66,9 +71,16 @@ func startPanel(cap *capture, up *uplink, serverURL string, getDevice func() str
 				}
 				switch m.Cmd {
 				case "setSending":
+					// Sin sala no se transmite: es lo que impide que una laptop
+					// mal configurada entre a un auditorio que no le toca.
+					if m.On && getRoom() == "" {
+						continue
+					}
 					up.setEnabled(m.On)
 				case "setDevice":
 					setDevice(m.Name)
+				case "setRoom":
+					setRoom(m.Name)
 				}
 			}
 		}()
@@ -80,9 +92,12 @@ func startPanel(cap *capture, up *uplink, serverURL string, getDevice func() str
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				room := getRoom()
 				if !send(map[string]any{
 					"type": "tick", "wave": cap.waveform(), "level": cap.level(),
 					"status": up.statusStr(), "sending": up.sending(),
+					"room": room, "rooms": getRooms(), "now": feed.nowIn(room),
+					"url": up.targetURL(),
 				}) {
 					return
 				}

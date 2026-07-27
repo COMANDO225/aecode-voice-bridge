@@ -62,6 +62,8 @@ func main() {
 		}
 		_ = saveConfig(c)
 	}
+	getRoom := func() string { cfgMu.Lock(); defer cfgMu.Unlock(); return cfg.Room }
+	getRooms := func() []RoomChoice { cfgMu.Lock(); defer cfgMu.Unlock(); return cfg.Rooms }
 	setAutostart := func(b bool) {
 		cfgMu.Lock()
 		cfg.Autostart = b
@@ -74,19 +76,51 @@ func main() {
 		log.Printf("no pude abrir el micrófono (%v) — elegí otro en el panel", err)
 	}
 
-	up := newUplink(cap.frames)
+	rec := newRecorder()
+	defer rec.close()
+	up := newUplink(cap.frames, rec)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go up.run(ctx, cfg.URL, cfg.Event, cfg.Room) // won't send until the switch is ON
-	if *send {
-		up.setEnabled(true)
+	up.setTarget(cfg.URL, cfg.Event, cfg.Room, cfg.Key)
+	go up.run(ctx) // won't send until the switch is ON *and* a room is picked
+
+	// setRoom es la operación del día del evento: elegir sala desde el panel, sin
+	// editar archivos ni reiniciar. Apagar el envío al cambiar es deliberado — cambiar
+	// de sala a mitad de una ponencia siempre es un error, y el operador debe volver a
+	// pulsar el switch a conciencia.
+	setRoom := func(slug string) {
+		cfgMu.Lock()
+		cfg.Room = slug
+		c := cfg
+		cfgMu.Unlock()
+		up.setEnabled(false)
+		up.setTarget(c.URL, c.Event, slug, c.Key)
+		_ = saveConfig(c)
+		log.Printf("sala = %q", slug)
 	}
 
-	panelURL, err := startPanel(cap, up, buildURL(cfg.URL, cfg.Event, cfg.Room), getDevice, setDevice)
+	feed := newRoomsFeed(cfg.RoomsURL, func(rs []RoomChoice) {
+		cfgMu.Lock()
+		cfg.Rooms = rs
+		c := cfg
+		cfgMu.Unlock()
+		_ = saveConfig(c) // cachear en disco: el día del evento puede no haber backend
+	})
+	go feed.run(ctx)
+
+	if *send {
+		if cfg.Room == "" {
+			log.Print("-send ignorado: no hay sala elegida (elígela en el panel)")
+		} else {
+			up.setEnabled(true)
+		}
+	}
+
+	panelURL, err := startPanel(cap, up, feed, getDevice, setDevice, getRoom, getRooms, setRoom)
 	if err != nil {
 		log.Printf("panel: %v", err)
 	}
-	log.Printf("bridge: panel=%s · server=%s · device=%q", panelURL, buildURL(cfg.URL, cfg.Event, cfg.Room), cfg.Device)
+	log.Printf("bridge: panel=%s · sala=%q · device=%q", panelURL, cfg.Room, cfg.Device)
 
 	if *console {
 		runConsole(cap, up)
