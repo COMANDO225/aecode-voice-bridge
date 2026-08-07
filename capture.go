@@ -37,8 +37,11 @@ func newCapture() (*capture, error) {
 	return &capture{ctx: ctx, frames: make(chan []byte, 256)}, nil
 }
 
-func (c *capture) inputDevices() []string {
-	infos, err := c.ctx.Devices(malgo.Capture)
+func (c *capture) inputDevices() []string  { return c.deviceNames(malgo.Capture) }
+func (c *capture) outputDevices() []string { return c.deviceNames(malgo.Playback) }
+
+func (c *capture) deviceNames(kind malgo.DeviceType) []string {
+	infos, err := c.ctx.Devices(kind)
 	if err != nil {
 		return nil
 	}
@@ -49,17 +52,22 @@ func (c *capture) inputDevices() []string {
 	return names
 }
 
-// start opens the input device whose name contains match (default input if empty)
-// and begins capturing into c.frames. Any previously open device is stopped first.
-func (c *capture) start(match string) error {
+// start opens the source and begins capturing into c.frames. loopback=true captures
+// the OUTPUT (whatever is playing: browser, Zoom, media…) via WASAPI loopback on
+// Windows; false captures an input device (mic/USB). Any previous device is stopped.
+func (c *capture) start(loopback bool, match string) error {
 	c.stop()
-	cfg := malgo.DefaultDeviceConfig(malgo.Capture)
+	dt := malgo.Capture
+	if loopback {
+		dt = malgo.Loopback // WASAPI (Windows): capta la SALIDA — "lo que suena"
+	}
+	cfg := malgo.DefaultDeviceConfig(dt)
 	cfg.Capture.Format = malgo.FormatS16
 	cfg.Capture.Channels = 1
 	cfg.SampleRate = 16000
 	cfg.Alsa.NoMMap = 1
 	if match != "" {
-		if id, ok := c.findID(match); ok {
+		if id, ok := c.findID(loopback, match); ok {
 			cfg.Capture.DeviceID = id.Pointer()
 		}
 	}
@@ -130,8 +138,12 @@ func (c *capture) waveform() []float32 {
 	return out
 }
 
-func (c *capture) findID(match string) (malgo.DeviceID, bool) {
-	infos, err := c.ctx.Devices(malgo.Capture)
+func (c *capture) findID(loopback bool, match string) (malgo.DeviceID, bool) {
+	kind := malgo.Capture
+	if loopback {
+		kind = malgo.Playback // loopback = capturar una SALIDA
+	}
+	infos, err := c.ctx.Devices(kind)
 	if err != nil {
 		return malgo.DeviceID{}, false
 	}

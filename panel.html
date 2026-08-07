@@ -40,6 +40,11 @@
   .toggle.on::after{left:33px}
   footer{color:var(--muted);font-size:12px;text-align:center}
   code{background:#08122a;padding:2px 7px;border-radius:6px}
+  .wavehead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .micbtn{width:46px;height:46px;border-radius:50%;border:1px solid var(--edge);background:#0e1c3a;
+          color:var(--gold);font-size:21px;cursor:pointer;flex:none;transition:.15s}
+  .micbtn:hover{filter:brightness(1.15)}
+  .micbtn.muted{background:#3a1220;border-color:#7a2740;color:#ff6b8f}
   /* modal */
   .overlay{position:fixed;inset:0;background:rgba(4,10,25,.72);display:none;align-items:center;justify-content:center;padding:20px;z-index:10}
   .overlay.show{display:flex}
@@ -59,9 +64,21 @@
   <div id="pill" class="pill"><span class="dot"></span><span id="pillText">Conectando panel…</span></div>
 
   <div class="card">
-    <p class="lbl">Sonido que se está detectando (entrada)</p>
+    <div class="wavehead">
+      <p class="lbl" style="margin:0">Sonido detectado</p>
+      <button id="mute" class="micbtn" title="Silenciar / reanudar (no corta el canal)">🎙️</button>
+    </div>
     <canvas id="wave"></canvas>
     <div class="meter"><i id="meter"></i></div>
+    <div class="s" id="muteSub" style="display:none;color:#ff8fab;margin-top:8px">🔇 Silenciado — se ve el sonido pero NO sale al servidor (el canal sigue vivo).</div>
+  </div>
+
+  <div class="card">
+    <p class="lbl">Fuente de audio</p>
+    <select id="source">
+      <option value="mic">🎤 Micrófono / tarjeta de sonido (USB)</option>
+      <option value="system">🔊 Audio de la computadora — lo que suena (Zoom, navegador, cualquier app)</option>
+    </select>
   </div>
 
   <div class="card">
@@ -76,7 +93,7 @@
   </div>
 
   <div class="card">
-    <p class="lbl">Micrófono / tarjeta de sonido</p>
+    <p class="lbl" id="deviceLbl">Micrófono / tarjeta de sonido</p>
     <select id="device"></select>
   </div>
 
@@ -105,7 +122,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const cv = $('wave'), ctx = cv.getContext('2d');
-let sending = false, pendingOn = null;
+let sending = false, pendingOn = null, source = 'mic', muted = false, lastDevSig = '';
 
 function fit(){ const r=cv.getBoundingClientRect(), d=devicePixelRatio||1;
   cv.width=r.width*d; cv.height=r.height*d; ctx.setTransform(d,0,0,d,0,0); }
@@ -115,19 +132,35 @@ function drawWave(wave){
   const w=cv.width/(devicePixelRatio||1), h=cv.height/(devicePixelRatio||1), mid=h/2;
   ctx.clearRect(0,0,w,h);
   ctx.strokeStyle='#1b2b4d'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,mid); ctx.lineTo(w,mid); ctx.stroke();
-  const n=wave.length, bw=w/n; ctx.fillStyle='#FFD700';
+  const n=wave.length, bw=w/n; ctx.fillStyle = muted ? '#5b6b8a' : '#FFD700';
   for(let i=0;i<n;i++){ const a=Math.min(1,wave[i])*mid*0.92; ctx.fillRect(i*bw, mid-a, Math.max(1,bw-0.5), a*2||1); }
 }
 
 function setPill(status, snd){
-  const p=$('pill'); p.className='pill';
-  if(snd && status==='connected'){ p.classList.add('on'); $('pillText').textContent='Enviando en vivo ✓'; }
-  else if(snd){ p.classList.add('wait'); $('pillText').textContent='Conectando al servidor…'; }
-  else { $('pillText').textContent='Detenido — no se envía'; }
+  const p=$('pill'); p.className='pill'; let txt;
+  if(snd && status==='connected'){ p.classList.add('on'); txt='Enviando en vivo ✓'; }
+  else if(snd){ p.classList.add('wait'); txt='Conectando al servidor…'; }
+  else { txt='Detenido — no se envía'; }
+  if(snd && muted) txt += ' · 🔇 SILENCIADO';
+  $('pillText').textContent = txt;
 }
 function setSwitch(snd){
   sending=snd; $('toggle').classList.toggle('on', snd);
   $('switchSub').textContent = snd ? 'Encendido — enviando a la traducción en vivo' : 'Apagado — el audio no sale de esta PC';
+}
+function renderDevices(devices, device){
+  const sig = JSON.stringify(devices||[]) + '|' + (device||'');
+  if (sig === lastDevSig) return; // no repintar 30 veces/seg (cerraría el desplegable)
+  lastDevSig = sig;
+  const sel=$('device'); sel.innerHTML='';
+  (devices||[]).forEach(d=>{ const o=document.createElement('option'); o.value=d; o.textContent=d; if(d===device)o.selected=true; sel.appendChild(o); });
+  $('deviceLbl').textContent = source==='system' ? 'Salida a capturar (donde suena el audio)' : 'Micrófono / tarjeta de sonido';
+}
+function setSource(src){ if(source===src) return; source=src; $('source').value=src; lastDevSig=''; }
+function setMuted(m){
+  muted=m; const b=$('mute');
+  b.classList.toggle('muted', m); b.textContent = m ? '🔇' : '🎙️';
+  $('muteSub').style.display = m ? 'block' : 'none';
 }
 
 // ── modal ──
@@ -144,6 +177,8 @@ $('mOk').onclick = ()=>{ $('overlay').classList.remove('show'); if(pendingOn!==n
 $('toggle').onclick = ()=> ask(!sending);
 $('device').onchange = e => ws.send(JSON.stringify({cmd:'setDevice', name:e.target.value}));
 $('room').onchange   = e => ws.send(JSON.stringify({cmd:'setRoom',   name:e.target.value}));
+$('source').onchange = e => ws.send(JSON.stringify({cmd:'setSource', name:e.target.value}));
+$('mute').onclick    = ()=> ws.send(JSON.stringify({cmd:'setMuted',  on:!muted}));
 
 let lastRooms = '';
 function renderRooms(rooms, room, now){
@@ -177,12 +212,16 @@ function connect(){
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
     if(m.type==='init'){
-      const sel=$('device'); sel.innerHTML='';
-      (m.devices||[]).forEach(d=>{ const o=document.createElement('option'); o.value=d; o.textContent=d; if(d===m.device)o.selected=true; sel.appendChild(o); });
+      if(m.source) setSource(m.source);
+      setMuted(!!m.muted);
+      renderDevices(m.devices, m.device);
       $('url').textContent = m.url || '—';
       setSwitch(!!m.sending); setPill(m.status, !!m.sending);
       renderRooms(m.rooms, m.room, m.now);
     } else if(m.type==='tick'){
+      if(m.source) setSource(m.source);
+      setMuted(!!m.muted);
+      renderDevices(m.devices, m.device);
       drawWave(m.wave||[]); $('meter').style.width = Math.min(100,(m.level||0)*400)+'%';
       setSwitch(!!m.sending); setPill(m.status, !!m.sending);
       renderRooms(m.rooms, m.room, m.now);

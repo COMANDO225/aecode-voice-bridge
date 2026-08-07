@@ -24,6 +24,7 @@ type uplink struct {
 	frames  <-chan []byte
 	st      atomic.Int32
 	enabled atomic.Bool
+	muted   atomic.Bool
 	// target: la URL completa de ingest. Atómica y NO capturada al arrancar, que era el
 	// motivo de que la sala solo se pudiera cambiar editando un archivo y reiniciando.
 	// Vacía = sin sala elegida: no se disca nada.
@@ -60,6 +61,11 @@ func (u *uplink) status() status    { return status(u.st.Load()) }
 func (u *uplink) sending() bool     { return u.enabled.Load() }
 func (u *uplink) setEnabled(b bool) { u.enabled.Store(b) }
 
+// MUTE (silencio suave, ≠ switch): manda silencio pero NO cierra la conexión. El
+// canal sigue vivo; al desmutear el audio real vuelve al instante, sin reconectar.
+func (u *uplink) isMuted() bool   { return u.muted.Load() }
+func (u *uplink) setMuted(b bool) { u.muted.Store(b) }
+
 func (u *uplink) statusStr() string {
 	switch u.status() {
 	case statusConnected:
@@ -89,6 +95,9 @@ func (u *uplink) run(ctx context.Context) {
 			return
 		case f := <-u.frames: // always drain, even when off
 			full := u.targetURL()
+			if u.muted.Load() { // MUTE: silencio, pero el canal NO se cierra
+				f = make([]byte, len(f))
+			}
 			// Se graba lo que se ENVÍA (switch prendido), no lo que se capta: el
 			// archivo debe corresponder con lo que el servidor debería haber recibido.
 			if u.enabled.Load() && u.rec != nil {

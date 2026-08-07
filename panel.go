@@ -21,6 +21,7 @@ func startPanel(
 	cap *capture, up *uplink, feed *roomsFeed,
 	getDevice func() string, setDevice func(string),
 	getRoom func() string, getRooms func() []RoomChoice, setRoom func(string),
+	getSource func() string, setSource func(string),
 ) (string, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -49,9 +50,17 @@ func startPanel(
 			defer cancel()
 			return c.Write(wctx, websocket.MessageText, b) == nil
 		}
+		// input (mic) o output (loopback) según la fuente elegida.
+		devicesFor := func() []string {
+			if getSource() == "system" {
+				return cap.outputDevices()
+			}
+			return cap.inputDevices()
+		}
 
 		send(map[string]any{
-			"type": "init", "devices": cap.inputDevices(), "device": getDevice(),
+			"type": "init", "devices": devicesFor(), "device": getDevice(),
+			"source": getSource(), "muted": up.isMuted(),
 			"url": up.targetURL(), "sending": up.sending(), "status": up.statusStr(),
 			"rooms": getRooms(), "room": getRoom(), "now": feed.nowIn(getRoom()),
 		})
@@ -81,21 +90,32 @@ func startPanel(
 					setDevice(m.Name)
 				case "setRoom":
 					setRoom(m.Name)
+				case "setSource":
+					setSource(m.Name)
+				case "setMuted":
+					up.setMuted(m.On)
 				}
 			}
 		}()
 
 		t := time.NewTicker(33 * time.Millisecond) // ~30 fps
 		defer t.Stop()
+		var lastSrc string
+		var cachedDevices []string // enumerar dispositivos es caro → solo al cambiar la fuente
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				room := getRoom()
+				room, src := getRoom(), getSource()
+				if src != lastSrc || cachedDevices == nil {
+					lastSrc = src
+					cachedDevices = devicesFor()
+				}
 				if !send(map[string]any{
 					"type": "tick", "wave": cap.waveform(), "level": cap.level(),
-					"status": up.statusStr(), "sending": up.sending(),
+					"status": up.statusStr(), "sending": up.sending(), "muted": up.isMuted(),
+					"source": src, "device": getDevice(), "devices": cachedDevices,
 					"room": room, "rooms": getRooms(), "now": feed.nowIn(room),
 					"url": up.targetURL(),
 				}) {

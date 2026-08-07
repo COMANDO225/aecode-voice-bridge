@@ -19,7 +19,8 @@ type Config struct {
 	// día del congreso, el operador sigue teniendo su desplegable — la traducción
 	// NUNCA debe depender de que el backend de eventos esté vivo.
 	Rooms     []RoomChoice `json:"rooms"`
-	Device    string       `json:"device"`    // input device name substring; "" = system default
+	Device    string       `json:"device"`    // device name substring; "" = default for the source
+	Source    string       `json:"source"`    // "mic" (entrada) | "system" (loopback: lo que suena); "" = mic
 	Autostart bool         `json:"autostart"` // start with the OS (Windows)
 }
 

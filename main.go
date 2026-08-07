@@ -55,15 +55,41 @@ func main() {
 	setDevice := func(name string) {
 		cfgMu.Lock()
 		cfg.Device = name
+		loop := cfg.Source == "system"
 		c := cfg
 		cfgMu.Unlock()
-		if err := cap.start(name); err != nil {
+		if err := cap.start(loop, name); err != nil {
 			log.Printf("no pude abrir %q: %v", name, err)
 		}
 		_ = saveConfig(c)
 	}
 	getRoom := func() string { cfgMu.Lock(); defer cfgMu.Unlock(); return cfg.Room }
 	getRooms := func() []RoomChoice { cfgMu.Lock(); defer cfgMu.Unlock(); return cfg.Rooms }
+	getSource := func() string {
+		cfgMu.Lock()
+		defer cfgMu.Unlock()
+		if cfg.Source == "system" {
+			return "system"
+		}
+		return "mic"
+	}
+	// setSource cambia entre micrófono y "audio de la computadora" (loopback: lo que
+	// suena — navegador, Zoom, cualquier programa). Resetea el dispositivo porque el
+	// anterior (una entrada) no aplica a una salida, y viceversa.
+	setSource := func(src string) {
+		if src != "system" {
+			src = "mic"
+		}
+		cfgMu.Lock()
+		cfg.Source = src
+		cfg.Device = ""
+		c := cfg
+		cfgMu.Unlock()
+		if err := cap.start(src == "system", ""); err != nil {
+			log.Printf("no pude abrir la fuente %q: %v", src, err)
+		}
+		_ = saveConfig(c)
+	}
 	setAutostart := func(b bool) {
 		cfgMu.Lock()
 		cfg.Autostart = b
@@ -72,7 +98,7 @@ func main() {
 		_ = saveConfig(c)
 	}
 
-	if err := cap.start(cfg.Device); err != nil { // capture always runs; sending is separate
+	if err := cap.start(cfg.Source == "system", cfg.Device); err != nil { // capture always runs; sending is separate
 		log.Printf("no pude abrir el micrófono (%v) — elegí otro en el panel", err)
 	}
 
@@ -116,7 +142,7 @@ func main() {
 		}
 	}
 
-	panelURL, err := startPanel(cap, up, feed, getDevice, setDevice, getRoom, getRooms, setRoom)
+	panelURL, err := startPanel(cap, up, feed, getDevice, setDevice, getRoom, getRooms, setRoom, getSource, setSource)
 	if err != nil {
 		log.Printf("panel: %v", err)
 	}
