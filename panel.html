@@ -77,8 +77,10 @@
     <p class="lbl">Fuente de audio</p>
     <select id="source">
       <option value="mic">🎤 Micrófono / tarjeta de sonido (USB)</option>
-      <option value="system">🔊 Audio de la computadora — lo que suena (Zoom, navegador, cualquier app)</option>
+      <option value="system">🔊 Audio de la computadora — todo lo que suena (Zoom, navegador, etc.)</option>
+      <option value="program">🎯 Un programa — solo esa app (Zoom, un reproductor…)</option>
     </select>
+    <div class="s" id="sourceHint" style="display:none;color:#9ab;margin-top:8px"></div>
   </div>
 
   <div class="card">
@@ -122,7 +124,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const cv = $('wave'), ctx = cv.getContext('2d');
-let sending = false, pendingOn = null, source = 'mic', muted = false, lastDevSig = '';
+let sending = false, pendingOn = null, source = 'mic', muted = false, lastDevSig = '', lastProgSig = '';
 
 function fit(){ const r=cv.getBoundingClientRect(), d=devicePixelRatio||1;
   cv.width=r.width*d; cv.height=r.height*d; ctx.setTransform(d,0,0,d,0,0); }
@@ -156,7 +158,33 @@ function renderDevices(devices, device){
   (devices||[]).forEach(d=>{ const o=document.createElement('option'); o.value=d; o.textContent=d; if(d===device)o.selected=true; sel.appendChild(o); });
   $('deviceLbl').textContent = source==='system' ? 'Salida a capturar (donde suena el audio)' : 'Micrófono / tarjeta de sonido';
 }
-function setSource(src){ if(source===src) return; source=src; $('source').value=src; lastDevSig=''; }
+// En modo "program" el mismo desplegable se llena con las apps que están sonando.
+function renderPrograms(progs, program){
+  const sig = JSON.stringify(progs||[]) + '|' + (program||'');
+  if (sig === lastProgSig) return;
+  lastProgSig = sig;
+  const sel=$('device'); sel.innerHTML='';
+  if(!progs || !progs.length){
+    const o=document.createElement('option'); o.value=''; o.textContent='— ninguna app con audio detectada —'; sel.appendChild(o);
+  } else {
+    progs.forEach(p=>{ const o=document.createElement('option'); o.value=p.value; o.textContent=p.label; if(p.value===program)o.selected=true; sel.appendChild(o); });
+  }
+  $('deviceLbl').textContent = 'Programa a capturar (solo su sonido)';
+}
+function renderPicker(m){
+  if(source==='program') renderPrograms(m.programs, m.program);
+  else renderDevices(m.devices, m.device);
+}
+const SOURCE_HINT = {
+  program: 'Elegí la app de la lista. Solo entra SU sonido, aunque otra cosa suene en paralelo. Para una pestaña puntual del navegador viene la extensión (próximamente).',
+  system: 'Entra TODO lo que suena por esa salida (si hay música en otra app, también se mezcla).',
+};
+function setSource(src){
+  if(source===src) return;
+  source=src; $('source').value=src; lastDevSig=''; lastProgSig='';
+  const h=$('sourceHint'), txt=SOURCE_HINT[src];
+  h.style.display = txt ? 'block' : 'none'; h.textContent = txt || '';
+}
 function setMuted(m){
   muted=m; const b=$('mute');
   b.classList.toggle('muted', m); b.textContent = m ? '🔇' : '🎙️';
@@ -175,7 +203,8 @@ function ask(on){
 $('mCancel').onclick = ()=> $('overlay').classList.remove('show');
 $('mOk').onclick = ()=>{ $('overlay').classList.remove('show'); if(pendingOn!==null) ws.send(JSON.stringify({cmd:'setSending', on:pendingOn})); };
 $('toggle').onclick = ()=> ask(!sending);
-$('device').onchange = e => ws.send(JSON.stringify({cmd:'setDevice', name:e.target.value}));
+$('device').onchange = e => ws.send(JSON.stringify(
+  source==='program' ? {cmd:'setProgram', name:e.target.value} : {cmd:'setDevice', name:e.target.value}));
 $('room').onchange   = e => ws.send(JSON.stringify({cmd:'setRoom',   name:e.target.value}));
 $('source').onchange = e => ws.send(JSON.stringify({cmd:'setSource', name:e.target.value}));
 $('mute').onclick    = ()=> ws.send(JSON.stringify({cmd:'setMuted',  on:!muted}));
@@ -214,14 +243,14 @@ function connect(){
     if(m.type==='init'){
       if(m.source) setSource(m.source);
       setMuted(!!m.muted);
-      renderDevices(m.devices, m.device);
+      renderPicker(m);
       $('url').textContent = m.url || '—';
       setSwitch(!!m.sending); setPill(m.status, !!m.sending);
       renderRooms(m.rooms, m.room, m.now);
     } else if(m.type==='tick'){
       if(m.source) setSource(m.source);
       setMuted(!!m.muted);
-      renderDevices(m.devices, m.device);
+      renderPicker(m);
       drawWave(m.wave||[]); $('meter').style.width = Math.min(100,(m.level||0)*400)+'%';
       setSwitch(!!m.sending); setPill(m.status, !!m.sending);
       renderRooms(m.rooms, m.room, m.now);

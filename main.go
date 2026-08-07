@@ -51,16 +51,36 @@ func main() {
 
 	// Single source of truth for config; panel and tray mutate it through helpers.
 	var cfgMu sync.Mutex
+
+	// applySource arranca el backend de captura que pide la config: mic/entrada,
+	// salida entera (loopback) o un programa concreto. Si "program" no está
+	// disponible (no-Windows, la app no está viva, o falla la activación) cae a la
+	// salida entera para que el panel siga mostrando sonido en vez de quedar mudo.
+	applySource := func(c Config) {
+		var err error
+		switch c.Source {
+		case "system":
+			err = cap.setActive(&deviceSource{ctx: cap.ctx, loopback: true, match: c.Device})
+		case "program":
+			if err = cap.setActive(&procSource{match: c.Program}); err != nil {
+				log.Printf("captura por programa no disponible (%v) — cae a audio del sistema", err)
+				err = cap.setActive(&deviceSource{ctx: cap.ctx, loopback: true})
+			}
+		default: // "mic"
+			err = cap.setActive(&deviceSource{ctx: cap.ctx, loopback: false, match: c.Device})
+		}
+		if err != nil {
+			log.Printf("no pude abrir la fuente %q: %v — elegí otra en el panel", c.Source, err)
+		}
+	}
+
 	getDevice := func() string { cfgMu.Lock(); defer cfgMu.Unlock(); return cfg.Device }
 	setDevice := func(name string) {
 		cfgMu.Lock()
 		cfg.Device = name
-		loop := cfg.Source == "system"
 		c := cfg
 		cfgMu.Unlock()
-		if err := cap.start(loop, name); err != nil {
-			log.Printf("no pude abrir %q: %v", name, err)
-		}
+		applySource(c)
 		_ = saveConfig(c)
 	}
 	getRoom := func() string { cfgMu.Lock(); defer cfgMu.Unlock(); return cfg.Room }
@@ -68,16 +88,19 @@ func main() {
 	getSource := func() string {
 		cfgMu.Lock()
 		defer cfgMu.Unlock()
-		if cfg.Source == "system" {
-			return "system"
+		switch cfg.Source {
+		case "system", "program":
+			return cfg.Source
 		}
 		return "mic"
 	}
-	// setSource cambia entre micrófono y "audio de la computadora" (loopback: lo que
-	// suena — navegador, Zoom, cualquier programa). Resetea el dispositivo porque el
-	// anterior (una entrada) no aplica a una salida, y viceversa.
+	// setSource cambia entre micrófono, "audio del sistema" (salida entera) y "un
+	// programa". Resetea el dispositivo porque una entrada no aplica a una salida; el
+	// programa elegido se conserva.
 	setSource := func(src string) {
-		if src != "system" {
+		switch src {
+		case "system", "program":
+		default:
 			src = "mic"
 		}
 		cfgMu.Lock()
@@ -85,9 +108,19 @@ func main() {
 		cfg.Device = ""
 		c := cfg
 		cfgMu.Unlock()
-		if err := cap.start(src == "system", ""); err != nil {
-			log.Printf("no pude abrir la fuente %q: %v", src, err)
-		}
+		applySource(c)
+		_ = saveConfig(c)
+	}
+	getProgram := func() string { cfgMu.Lock(); defer cfgMu.Unlock(); return cfg.Program }
+	getPrograms := func() []programChoice { return cap.programs() }
+	// setProgram elige la app a capturar (y pasa la fuente a "program").
+	setProgram := func(match string) {
+		cfgMu.Lock()
+		cfg.Program = match
+		cfg.Source = "program"
+		c := cfg
+		cfgMu.Unlock()
+		applySource(c)
 		_ = saveConfig(c)
 	}
 	setAutostart := func(b bool) {
@@ -98,13 +131,11 @@ func main() {
 		_ = saveConfig(c)
 	}
 
-	if err := cap.start(cfg.Source == "system", cfg.Device); err != nil { // capture always runs; sending is separate
-		log.Printf("no pude abrir el micrófono (%v) — elegí otro en el panel", err)
-	}
+	applySource(cfg) // capture always runs; sending is separate
 
 	rec := newRecorder()
 	defer rec.close()
-	up := newUplink(cap.frames, rec)
+	up := newUplink(cap.sink.frames, rec)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	up.setTarget(cfg.URL, cfg.Event, cfg.Room, cfg.Key)
@@ -142,7 +173,7 @@ func main() {
 		}
 	}
 
-	panelURL, err := startPanel(cap, up, feed, getDevice, setDevice, getRoom, getRooms, setRoom, getSource, setSource)
+	panelURL, err := startPanel(cap, up, feed, getDevice, setDevice, getRoom, getRooms, setRoom, getSource, setSource, getProgram, setProgram, getPrograms)
 	if err != nil {
 		log.Printf("panel: %v", err)
 	}
@@ -171,7 +202,7 @@ func runConsole(cap *capture, up *uplink) {
 		case <-sig:
 			return
 		case <-t.C:
-			log.Printf("%s · nivel %.3f · frames %d · descartados %d", up.statusStr(), cap.level(), cap.sent.Load(), cap.dropped.Load())
+			log.Printf("%s · nivel %.3f · frames %d · descartados %d", up.statusStr(), cap.level(), cap.sink.sent.Load(), cap.sink.dropped.Load())
 		}
 	}
 }

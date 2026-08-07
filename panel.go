@@ -22,6 +22,7 @@ func startPanel(
 	getDevice func() string, setDevice func(string),
 	getRoom func() string, getRooms func() []RoomChoice, setRoom func(string),
 	getSource func() string, setSource func(string),
+	getProgram func() string, setProgram func(string), getPrograms func() []programChoice,
 ) (string, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -50,17 +51,23 @@ func startPanel(
 			defer cancel()
 			return c.Write(wctx, websocket.MessageText, b) == nil
 		}
-		// input (mic) o output (loopback) según la fuente elegida.
+		// Lista para el desplegable de dispositivo según la fuente: entradas (mic),
+		// salidas (system) o nada (program → el desplegable se llena con `programs`).
 		devicesFor := func() []string {
-			if getSource() == "system" {
+			switch getSource() {
+			case "system":
 				return cap.outputDevices()
+			case "program":
+				return nil
+			default:
+				return cap.inputDevices()
 			}
-			return cap.inputDevices()
 		}
 
 		send(map[string]any{
 			"type": "init", "devices": devicesFor(), "device": getDevice(),
 			"source": getSource(), "muted": up.isMuted(),
+			"program": getProgram(), "programs": getPrograms(),
 			"url": up.targetURL(), "sending": up.sending(), "status": up.statusStr(),
 			"rooms": getRooms(), "room": getRoom(), "now": feed.nowIn(getRoom()),
 		})
@@ -92,6 +99,8 @@ func startPanel(
 					setRoom(m.Name)
 				case "setSource":
 					setSource(m.Name)
+				case "setProgram":
+					setProgram(m.Name)
 				case "setMuted":
 					up.setMuted(m.On)
 				}
@@ -101,7 +110,9 @@ func startPanel(
 		t := time.NewTicker(33 * time.Millisecond) // ~30 fps
 		defer t.Stop()
 		var lastSrc string
-		var cachedDevices []string // enumerar dispositivos es caro → solo al cambiar la fuente
+		var cachedDevices []string      // enumerar dispositivos es caro → solo al cambiar la fuente
+		var cachedProgs []programChoice // apps con audio → refrescar cada ~2s, no 30 veces/seg
+		var tick int
 		for {
 			select {
 			case <-ctx.Done():
@@ -111,11 +122,17 @@ func startPanel(
 				if src != lastSrc || cachedDevices == nil {
 					lastSrc = src
 					cachedDevices = devicesFor()
+					cachedProgs = nil // refrescar la lista de programas al cambiar de fuente
 				}
+				if src == "program" && (cachedProgs == nil || tick%60 == 0) {
+					cachedProgs = getPrograms()
+				}
+				tick++
 				if !send(map[string]any{
 					"type": "tick", "wave": cap.waveform(), "level": cap.level(),
 					"status": up.statusStr(), "sending": up.sending(), "muted": up.isMuted(),
 					"source": src, "device": getDevice(), "devices": cachedDevices,
+					"program": getProgram(), "programs": cachedProgs,
 					"room": room, "rooms": getRooms(), "now": feed.nowIn(room),
 					"url": up.targetURL(),
 				}) {

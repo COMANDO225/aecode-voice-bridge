@@ -18,10 +18,16 @@ type Config struct {
 	// Rooms: última lista buena, cacheada. Si el servicio de eventos no responde el
 	// día del congreso, el operador sigue teniendo su desplegable — la traducción
 	// NUNCA debe depender de que el backend de eventos esté vivo.
-	Rooms     []RoomChoice `json:"rooms"`
-	Device    string       `json:"device"`    // device name substring; "" = default for the source
-	Source    string       `json:"source"`    // "mic" (entrada) | "system" (loopback: lo que suena); "" = mic
-	Autostart bool         `json:"autostart"` // start with the OS (Windows)
+	Rooms  []RoomChoice `json:"rooms"`
+	Device string       `json:"device"` // device name substring; "" = default for the source
+	// Source: qué se capta. "mic" (entrada) | "system" (salida entera, loopback) |
+	// "program" (solo una app, Windows). "" = mic.
+	Source string `json:"source"`
+	// Program: match persistido de la app a capturar cuando Source=="program". Se
+	// guarda por NOMBRE de ejecutable (el PID cambia entre reinicios) y se re-resuelve
+	// a PID al arrancar.
+	Program   string `json:"program"`
+	Autostart bool   `json:"autostart"` // start with the OS (Windows)
 }
 
 // RoomChoice es una sala del desplegable.

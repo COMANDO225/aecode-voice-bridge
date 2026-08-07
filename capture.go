@@ -1,32 +1,38 @@
 package main
 
 import (
-	"math"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/gen2brain/malgo"
 )
 
-// wfLen is how many peak points the live waveform ring holds (~2s of history).
-const wfLen = 256
+// source is one audio backend feeding the sink. Exactly one is active at a time;
+// switching source stops the old one and starts the new one against the SAME sink,
+// so the frames channel (and the uplink connection) survive the switch.
+//
+// Implementations: deviceSource (malgo mic / whole-output loopback) and procSource
+// (per-program capture — Windows process loopback; a no-op stub elsewhere).
+type source interface {
+	start(sink *frameSink) error
+	stop()
+}
 
-// capture reads audio from an input device at 16 kHz mono s16le (miniaudio
-// resamples from the hardware format internally) and pushes frames to a channel.
-// The device can be switched at runtime without dropping the frames channel, so
-// the uplink never has to reconnect just because the mic changed.
+// programChoice is one entry of the "capture a specific program" picker.
+type programChoice struct {
+	Value string `json:"value"` // stable match persisted in config (exe name)
+	Label string `json:"label"` // shown to the operator (e.g. "Zoom")
+}
+
+// capture is the audio engine: it owns the miniaudio context (for device
+// enumeration and the malgo backends) and the single frameSink, and swaps the
+// active source on demand. Everything downstream reads the sink, never the source.
 type capture struct {
-	ctx     *malgo.AllocatedContext
-	dev     *malgo.Device
-	frames  chan []byte
-	sent    atomic.Uint64
-	dropped atomic.Uint64
-	lvlBits atomic.Uint64 // last frame RMS as float64 bits
+	ctx  *malgo.AllocatedContext
+	sink *frameSink
 
-	wfMu sync.Mutex
-	wf   [wfLen]float32 // ring of recent peak amplitudes (for the live waveform)
-	wfN  int            // next write index
+	mu     sync.Mutex
+	active source
 }
 
 func newCapture() (*capture, error) {
@@ -34,7 +40,37 @@ func newCapture() (*capture, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &capture{ctx: ctx, frames: make(chan []byte, 256)}, nil
+	return &capture{ctx: ctx, sink: newFrameSink()}, nil
+}
+
+func (c *capture) level() float64      { return c.sink.level() }
+func (c *capture) waveform() []float32 { return c.sink.waveform() }
+
+// setActive stops whatever is capturing and starts src against the shared sink.
+// On error the engine is left stopped (src did not start).
+func (c *capture) setActive(src source) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.active != nil {
+		c.active.stop()
+		c.active = nil
+	}
+	if err := src.start(c.sink); err != nil {
+		return err
+	}
+	c.active = src
+	return nil
+}
+
+func (c *capture) close() {
+	c.mu.Lock()
+	if c.active != nil {
+		c.active.stop()
+		c.active = nil
+	}
+	c.mu.Unlock()
+	_ = c.ctx.Uninit()
+	c.ctx.Free()
 }
 
 func (c *capture) inputDevices() []string  { return c.deviceNames(malgo.Capture) }
@@ -52,13 +88,22 @@ func (c *capture) deviceNames(kind malgo.DeviceType) []string {
 	return names
 }
 
-// start opens the source and begins capturing into c.frames. loopback=true captures
-// the OUTPUT (whatever is playing: browser, Zoom, media…) via WASAPI loopback on
-// Windows; false captures an input device (mic/USB). Any previous device is stopped.
-func (c *capture) start(loopback bool, match string) error {
-	c.stop()
+// programs lists the apps currently producing sound (Windows only; empty elsewhere).
+func (c *capture) programs() []programChoice { return listPrograms() }
+
+// deviceSource captures a miniaudio device: a mic/USB input (loopback=false) or a
+// whole OUTPUT endpoint via WASAPI loopback (loopback=true) — "everything playing
+// on that speaker". For a single program use procSource instead.
+type deviceSource struct {
+	ctx      *malgo.AllocatedContext
+	loopback bool
+	match    string
+	dev      *malgo.Device
+}
+
+func (d *deviceSource) start(sink *frameSink) error {
 	dt := malgo.Capture
-	if loopback {
+	if d.loopback {
 		dt = malgo.Loopback // WASAPI (Windows): capta la SALIDA — "lo que suena"
 	}
 	cfg := malgo.DefaultDeviceConfig(dt)
@@ -66,24 +111,13 @@ func (c *capture) start(loopback bool, match string) error {
 	cfg.Capture.Channels = 1
 	cfg.SampleRate = 16000
 	cfg.Alsa.NoMMap = 1
-	if match != "" {
-		if id, ok := c.findID(loopback, match); ok {
+	if d.match != "" {
+		if id, ok := findDeviceID(d.ctx, d.loopback, d.match); ok {
 			cfg.Capture.DeviceID = id.Pointer()
 		}
 	}
-	onFrames := func(_, in []byte, _ uint32) {
-		c.lvlBits.Store(math.Float64bits(rms(in)))
-		c.pushWaveform(in)
-		buf := make([]byte, len(in))
-		copy(buf, in)
-		select {
-		case c.frames <- buf:
-			c.sent.Add(1)
-		default:
-			c.dropped.Add(1) // uplink behind → drop, stay real-time
-		}
-	}
-	dev, err := malgo.InitDevice(c.ctx.Context, cfg, malgo.DeviceCallbacks{Data: onFrames})
+	onFrames := func(_, in []byte, _ uint32) { sink.push(in) }
+	dev, err := malgo.InitDevice(d.ctx.Context, cfg, malgo.DeviceCallbacks{Data: onFrames})
 	if err != nil {
 		return err
 	}
@@ -91,59 +125,25 @@ func (c *capture) start(loopback bool, match string) error {
 		dev.Uninit()
 		return err
 	}
-	c.dev = dev
+	d.dev = dev
 	return nil
 }
 
-func (c *capture) stop() {
-	if c.dev != nil {
-		c.dev.Uninit()
-		c.dev = nil
+func (d *deviceSource) stop() {
+	if d.dev != nil {
+		d.dev.Uninit()
+		d.dev = nil
 	}
 }
 
-func (c *capture) level() float64 { return math.Float64frombits(c.lvlBits.Load()) }
-
-// pushWaveform appends peak amplitudes (one per ~128 samples ≈ 8 ms) to the ring,
-// giving the panel a scrolling oscilloscope of the live input.
-func (c *capture) pushWaveform(b []byte) {
-	const step = 128 // samples per peak
-	c.wfMu.Lock()
-	for i := 0; i+1 < len(b); {
-		var peak float32
-		end := i + step*2
-		for ; i+1 < len(b) && i < end; i += 2 {
-			s := float32(int16(uint16(b[i])|uint16(b[i+1])<<8)) / 32768
-			if s < 0 {
-				s = -s
-			}
-			if s > peak {
-				peak = s
-			}
-		}
-		c.wf[c.wfN%wfLen] = peak
-		c.wfN++
-	}
-	c.wfMu.Unlock()
-}
-
-// waveform returns the ring in chronological order (oldest → newest).
-func (c *capture) waveform() []float32 {
-	out := make([]float32, wfLen)
-	c.wfMu.Lock()
-	for i := 0; i < wfLen; i++ {
-		out[i] = c.wf[(c.wfN+i)%wfLen]
-	}
-	c.wfMu.Unlock()
-	return out
-}
-
-func (c *capture) findID(loopback bool, match string) (malgo.DeviceID, bool) {
+// findDeviceID resolves a device name substring to its ID. loopback picks among
+// OUTPUT (Playback) devices, otherwise among INPUT (Capture) devices.
+func findDeviceID(ctx *malgo.AllocatedContext, loopback bool, match string) (malgo.DeviceID, bool) {
 	kind := malgo.Capture
 	if loopback {
 		kind = malgo.Playback // loopback = capturar una SALIDA
 	}
-	infos, err := c.ctx.Devices(kind)
+	infos, err := ctx.Devices(kind)
 	if err != nil {
 		return malgo.DeviceID{}, false
 	}
@@ -154,24 +154,4 @@ func (c *capture) findID(loopback bool, match string) (malgo.DeviceID, bool) {
 		}
 	}
 	return malgo.DeviceID{}, false
-}
-
-func (c *capture) close() {
-	c.stop()
-	_ = c.ctx.Uninit()
-	c.ctx.Free()
-}
-
-// rms is the normalized (0..1) RMS of a PCM s16le mono frame — the level meter.
-func rms(b []byte) float64 {
-	if len(b) < 2 {
-		return 0
-	}
-	var sum float64
-	n := len(b) / 2
-	for i := 0; i+1 < len(b); i += 2 {
-		s := float64(int16(uint16(b[i])|uint16(b[i+1])<<8)) / 32768
-		sum += s * s
-	}
-	return math.Sqrt(sum / float64(n))
 }
