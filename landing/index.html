@@ -4,62 +4,145 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AECODE Voz — Puente de audio</title>
+<meta name="description" content="Envía el audio del ponente a la traducción en vivo. Toma el micrófono o el audio de la computadora, corre en la bandeja y reconecta solo.">
 <link rel="icon" href="https://raw.githubusercontent.com/COMANDO225/aecode-voice-bridge/main/icon.png">
 <style>
-  :root{--bg:#0F1F3D;--card:#0b1730;--gold:#FFD700;--text:#eaf0ff;--muted:#9ab;}
+  :root{
+    --bg:#0a1226; --bg2:#0f1f3d; --card:rgba(255,255,255,.045); --line:rgba(255,255,255,.10);
+    --gold:#FFD700; --violet:#c9b3ff; --text:#eaf0ff; --muted:#94a6c9;
+  }
   *{box-sizing:border-box}
-  body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.55}
-  .wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
-  header{text-align:center;padding:36px 0 12px}
-  .logo{width:96px;height:96px;border-radius:22px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
-  h1{font-size:30px;margin:16px 0 6px;color:#c9b3ff}
-  .tag{color:var(--muted);font-size:17px;margin:0 auto;max-width:520px}
-  .cta{display:inline-flex;align-items:center;gap:10px;margin:28px 0 8px;background:var(--gold);color:var(--bg);
-       font-size:20px;font-weight:800;padding:16px 30px;border-radius:14px;text-decoration:none;box-shadow:0 8px 24px rgba(255,215,0,.18)}
-  .cta:hover{transform:translateY(-1px)}
-  .os{color:var(--muted);font-size:13px;margin-top:6px}
-  .card{background:var(--card);border:1px solid #26365c;border-radius:16px;padding:22px 24px;margin:22px 0}
-  h2{font-size:19px;color:var(--gold);margin:0 0 12px}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--text);line-height:1.6;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(201,179,255,.16), transparent 60%),
+      radial-gradient(900px 500px at 90% 10%, rgba(255,215,0,.08), transparent 55%),
+      linear-gradient(180deg,var(--bg),var(--bg2));
+    background-attachment:fixed;min-height:100vh;
+  }
+  .wrap{max-width:880px;margin:0 auto;padding:28px 20px 72px}
+
+  /* ---- topbar ---- */
+  .top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 2px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.2px}
+  .brand img{width:30px;height:30px;border-radius:8px}
+  .ver{font-size:13px;font-weight:700;color:var(--gold);border:1px solid rgba(255,215,0,.4);
+       background:rgba(255,215,0,.08);padding:4px 11px;border-radius:999px;white-space:nowrap}
+
+  /* ---- hero ---- */
+  header{text-align:center;padding:46px 0 8px}
+  .logo{width:104px;height:104px;border-radius:26px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  h1{font-size:clamp(28px,6vw,40px);margin:20px 0 8px;
+     background:linear-gradient(90deg,var(--violet),#eaf0ff 60%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tag{color:var(--muted);font-size:clamp(16px,2.4vw,18px);margin:0 auto;max-width:560px}
+
+  /* soundwave */
+  .wave{display:flex;gap:5px;justify-content:center;align-items:center;height:44px;margin:26px 0 4px}
+  .wave i{width:5px;height:12px;border-radius:3px;background:linear-gradient(180deg,var(--gold),var(--violet));
+          animation:bounce 1.1s ease-in-out infinite}
+  @keyframes bounce{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
+  @media (prefers-reduced-motion:reduce){.wave i{animation:none}}
+
+  .cta{display:inline-flex;align-items:center;gap:11px;margin:22px 0 8px;background:var(--gold);color:#12203f;
+       font-size:19px;font-weight:800;padding:16px 32px;border-radius:14px;text-decoration:none;
+       box-shadow:0 12px 32px rgba(255,215,0,.22);transition:transform .12s ease,box-shadow .12s ease}
+  .cta:hover{transform:translateY(-2px);box-shadow:0 16px 38px rgba(255,215,0,.3)}
+  .os{color:var(--muted);font-size:13px;margin-top:8px}
+
+  /* ---- features ---- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin:38px 0 6px}
+  .feat{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 20px;
+        backdrop-filter:blur(6px)}
+  .feat .ic{font-size:26px;line-height:1}
+  .feat h3{margin:12px 0 6px;font-size:17px;color:var(--text)}
+  .feat p{margin:0;color:var(--muted);font-size:14.5px}
+  .new{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.4px;color:#12203f;
+       background:var(--gold);padding:2px 8px;border-radius:999px;margin-left:8px;vertical-align:middle}
+
+  /* ---- cards ---- */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px 26px;margin:22px 0;
+        backdrop-filter:blur(6px)}
+  h2{font-size:20px;color:var(--text);margin:0 0 14px;display:flex;align-items:center;gap:9px}
+  h2 .dot{width:8px;height:8px;border-radius:50%;background:var(--gold);box-shadow:0 0 12px var(--gold)}
   ol,ul{margin:0;padding-left:22px}
-  li{margin:8px 0}
+  li{margin:9px 0}
+  b{color:#fff}
   .muted{color:var(--muted)}
-  code{background:#142a4d;padding:2px 7px;border-radius:6px;font-size:14px}
-  .center{text-align:center}
-  footer{text-align:center;color:var(--muted);font-size:13px;margin-top:34px}
-  a{color:#8fbcff}
+  code{background:rgba(255,255,255,.08);padding:2px 7px;border-radius:6px;font-size:13.5px}
+  .pill{display:inline-block;font-size:12.5px;color:var(--violet);border:1px solid var(--line);
+        border-radius:999px;padding:3px 10px;margin:2px 4px 2px 0}
+  footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
+  footer a{color:#8fbcff;text-decoration:none}
 </style>
 </head>
 <body>
 <div class="wrap">
+
+  <div class="top">
+    <span class="brand"><img src="https://raw.githubusercontent.com/COMANDO225/aecode-voice-bridge/main/icon.png" alt="">AECODE Voz</span>
+    <span class="ver" id="ver">v0.6.0</span>
+  </div>
+
   <header>
     <img class="logo" src="https://raw.githubusercontent.com/COMANDO225/aecode-voice-bridge/main/icon.png" alt="AECODE Voz">
-    <h1>AECODE Voz — Puente de audio</h1>
-    <p class="tag">Envía el audio del ponente a la traducción en vivo. Corre en la bandeja del sistema,
-    no lo afecta minimizar, y reconecta solo.</p>
-    <div class="center">
-      <a class="cta" href="https://github.com/COMANDO225/aecode-voice-bridge/releases/latest/download/aecode-voice-bridge.exe">
-        ⬇ Descargar para Windows
-      </a>
-      <div class="os">Windows 10/11 · 64-bit · sin instalación (portable)</div>
+    <h1>Puente de audio en vivo</h1>
+    <p class="tag">Lleva la voz del ponente a la traducción simultánea. Toma el micrófono <b>o</b> el
+    audio de la computadora, corre en la bandeja y reconecta solo.</p>
+
+    <div class="wave" aria-hidden="true">
+      <i style="animation-delay:0s"></i><i style="animation-delay:.09s"></i><i style="animation-delay:.18s"></i>
+      <i style="animation-delay:.27s"></i><i style="animation-delay:.36s"></i><i style="animation-delay:.27s"></i>
+      <i style="animation-delay:.18s"></i><i style="animation-delay:.09s"></i><i style="animation-delay:0s"></i>
     </div>
+
+    <a class="cta" href="https://github.com/COMANDO225/aecode-voice-bridge/releases/latest/download/aecode-voice-bridge.exe">
+      ⬇ Descargar para Windows
+    </a>
+    <div class="os">Windows 10/11 · 64-bit · sin instalación (portable)</div>
   </header>
 
+  <div class="grid">
+    <div class="feat">
+      <div class="ic">🎧</div>
+      <h3>Cualquier fuente <span class="new">NUEVO</span></h3>
+      <p>Micrófono/receptor de sala <b>o</b> el audio de la propia computadora: una reunión online,
+      un video del navegador o cualquier programa que suene.</p>
+    </div>
+    <div class="feat">
+      <div class="ic">🔇</div>
+      <h3>Silencio al toque <span class="new">NUEVO</span></h3>
+      <p>¿Toses o hablas aparte? Un botón silencia lo que sale y otro lo devuelve —sin cortar la
+      transmisión ni desconectar nada.</p>
+    </div>
+    <div class="feat">
+      <div class="ic">♾️</div>
+      <h3>Siempre en línea</h3>
+      <p>Vive en la bandeja del sistema: minimizarla no la afecta y si se cae la red, reconecta sola.</p>
+    </div>
+  </div>
+
   <div class="card">
-    <h2>Cómo usar</h2>
+    <h2><span class="dot"></span>Cómo usar</h2>
     <ol>
       <li>Doble-clic al <code>.exe</code> → aparece el ícono 🎙️ en la bandeja (abajo a la derecha) y se abre el panel.</li>
-      <li>En el panel, elegí tu <b>tarjeta de sonido USB</b> y mirá que la <b>onda se mueva</b> cuando hay sonido.</li>
-      <li>Prendé el <b>switch “Enviar al servidor”</b> y confirmá en el modal.</li>
-      <li>Estado <b>Enviando ✓</b> = está mandando a la nube. Listo.</li>
+      <li>Elegí la <b>fuente</b>:
+        <span class="pill">🎤 Micrófono / USB</span>
+        <span class="pill">🔊 Audio de la computadora</span>
+        y verificá que la <b>onda se mueva</b> cuando hay sonido.</li>
+      <li>Elegí tu <b>sala</b> y prendé el <b>switch “Enviar”</b> (te pide confirmar).</li>
+      <li>Estado <b>Enviando ✓</b> = ya llega a la traducción. Para una pausa breve, tocá <b>🔇 silenciar</b>.</li>
     </ol>
     <p class="muted">Cerrar el panel no cierra la app (sigue en la bandeja). Para salir del todo: bandeja → <b>Salir</b>.
     Opcional: <b>“Iniciar con el sistema”</b> para que arranque solo.</p>
   </div>
 
   <div class="card">
-    <h2>Hardware necesario</h2>
-    <p class="muted">El audio del ponente entra por el receptor UHF a una <b>tarjeta de sonido USB con entrada</b>
-    (de micrófono o línea), y esa tarjeta va al USB de la laptop.</p>
+    <h2><span class="dot"></span>¿Necesito equipo?</h2>
+    <p class="muted"><b>Reunión online (Zoom, Meet, navegador):</b> no hace falta nada — elegí
+    <b>“Audio de la computadora”</b> y listo.</p>
+    <p class="muted"><b>Ponente en sala:</b> su voz entra por el receptor UHF a una
+    <b>tarjeta de sonido USB con entrada</b>, y esa tarjeta al USB de la laptop:</p>
     <ul>
       <li>Tarjeta USB de <b>2 jacks</b> (verde=salida, 🎤 rosa=<b>entrada</b>) → el UHF va al de micrófono.</li>
       <li>O <b>Behringer UCA202</b> (entrada de línea, mejor calidad, sin saturación).</li>
@@ -69,9 +152,16 @@
   </div>
 
   <footer>
-    AECODE · CONEIC — traducción en vivo &middot;
-    <a href="https://github.com/COMANDO225/aecode-voice-bridge">código en GitHub</a>
+    AECODE · CONEIC — traducción simultánea en vivo
   </footer>
 </div>
+
+<script>
+  // Muestra siempre la última versión publicada (así el número no vuelve a quedar viejo).
+  fetch('https://api.github.com/repos/COMANDO225/aecode-voice-bridge/releases/latest')
+    .then(function(r){ return r.ok ? r.json() : null })
+    .then(function(d){ if (d && d.tag_name) document.getElementById('ver').textContent = d.tag_name })
+    .catch(function(){});
+</script>
 </body>
 </html>
