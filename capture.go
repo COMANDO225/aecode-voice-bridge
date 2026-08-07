@@ -45,6 +45,7 @@ func newCapture() (*capture, error) {
 
 func (c *capture) level() float64      { return c.sink.level() }
 func (c *capture) waveform() []float32 { return c.sink.waveform() }
+func (c *capture) bands() []float32    { return c.sink.bands() }
 
 // setActive stops whatever is capturing and starts src against the shared sink.
 // On error the engine is left stopped (src did not start).

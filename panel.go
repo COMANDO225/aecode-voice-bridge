@@ -68,6 +68,7 @@ func startPanel(
 			"type": "init", "devices": devicesFor(), "device": getDevice(),
 			"source": getSource(), "muted": up.isMuted(),
 			"program": getProgram(), "programs": getPrograms(),
+			"level": cap.level(), "bands": cap.bands(),
 			"url": up.targetURL(), "sending": up.sending(), "status": up.statusStr(),
 			"rooms": getRooms(), "room": getRoom(), "now": feed.nowIn(getRoom()),
 		})
@@ -129,7 +130,7 @@ func startPanel(
 				}
 				tick++
 				if !send(map[string]any{
-					"type": "tick", "wave": cap.waveform(), "level": cap.level(),
+					"type": "tick", "level": cap.level(), "bands": cap.bands(),
 					"status": up.statusStr(), "sending": up.sending(), "muted": up.isMuted(),
 					"source": src, "device": getDevice(), "devices": cachedDevices,
 					"program": getProgram(), "programs": cachedProgs,
